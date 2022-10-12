@@ -140,10 +140,12 @@ class AudioEncoder(nn.Module):
         )
         self.ln_post = LayerNorm(n_state)
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor, include_embeddings: bool = False):
         """
         x : torch.Tensor, shape = (batch_size, n_mels, n_ctx)
             the mel spectrogram of the audio
+        include_embeddings: bool
+            whether to include intermediate steps in the output
         """
         x = F.gelu(self.conv1(x))
         x = F.gelu(self.conv2(x))
@@ -152,11 +154,21 @@ class AudioEncoder(nn.Module):
         assert x.shape[1:] == self.positional_embedding.shape, "incorrect audio shape"
         x = (x + self.positional_embedding).to(x.dtype)
 
+        if include_embeddings:
+            embeddings = [x.detach().numpy()]
+
         for block in self.blocks:
             x = block(x)
+            if include_embeddings:
+                embeddings.append(x.detach().numpy())
 
         x = self.ln_post(x)
-        return x
+
+        if include_embeddings:
+            embeddings = np.stack(embeddings, axis=1)
+            return x, embeddings
+        else:
+            return x
 
 
 class TextDecoder(nn.Module):
@@ -174,24 +186,35 @@ class TextDecoder(nn.Module):
         mask = torch.empty(n_ctx, n_ctx).fill_(-np.inf).triu_(1)
         self.register_buffer("mask", mask, persistent=False)
 
-    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None):
+    def forward(self, x: Tensor, xa: Tensor, kv_cache: Optional[dict] = None, include_embeddings: bool = False):
         """
         x : torch.LongTensor, shape = (batch_size, <= n_ctx)
             the text tokens
         xa : torch.Tensor, shape = (batch_size, n_mels, n_audio_ctx)
             the encoded audio features to be attended on
+        include_embeddings : bool
+            Whether to include intermediate values in the output to this function
         """
         offset = next(iter(kv_cache.values())).shape[1] if kv_cache else 0
         x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[-1]]
         x = x.to(xa.dtype)
 
+        if include_embeddings:
+            embeddings = [x.detach().numpy()]
+
         for block in self.blocks:
             x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
+            if include_embeddings:
+                embeddings.append(x.detach().numpy())
 
         x = self.ln(x)
         logits = (x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)).float()
 
-        return logits
+        if include_embeddings:
+            embeddings = np.stack(embeddings, axis=1)
+            return logits, embeddings
+        else:
+            return logits
 
 
 class Whisper(nn.Module):
