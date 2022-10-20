@@ -155,12 +155,12 @@ class AudioEncoder(nn.Module):
         x = (x + self.positional_embedding).to(x.dtype)
 
         if include_embeddings:
-            embeddings = [x.detach().numpy()]
+            embeddings = [x.cpu().detach().numpy()]
 
         for block in self.blocks:
             x = block(x)
             if include_embeddings:
-                embeddings.append(x.detach().numpy())
+                embeddings.append(x.cpu().detach().numpy())
 
         x = self.ln_post(x)
 
@@ -200,12 +200,12 @@ class TextDecoder(nn.Module):
         x = x.to(xa.dtype)
 
         if include_embeddings:
-            embeddings = [x.detach().numpy()]
+            embeddings = [x.cpu().detach().numpy()]
 
         for block in self.blocks:
             x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
             if include_embeddings:
-                embeddings.append(x.detach().numpy())
+                embeddings.append(x.cpu().detach().numpy())
 
         x = self.ln(x)
         logits = (x @ torch.transpose(self.token_embedding.weight.to(x.dtype), 0, 1)).float()
