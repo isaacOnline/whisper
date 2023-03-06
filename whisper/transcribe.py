@@ -146,7 +146,7 @@ def transcribe(
         initial_prompt_tokens = []
 
     def add_segment(
-        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult, encoder_embeddings, decoder_embeddings
+        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
     ):
         text = tokenizer.decode([token for token in text_tokens if token < tokenizer.eot])
         if len(text.strip()) == 0:  # skip empty text output
@@ -164,8 +164,6 @@ def transcribe(
                 "avg_logprob": result.avg_logprob,
                 "compression_ratio": result.compression_ratio,
                 "no_speech_prob": result.no_speech_prob,
-                "encoder_embeddings":encoder_embeddings,
-                "decoder_embeddings":decoder_embeddings
             }
         )
         if verbose:
@@ -199,59 +197,41 @@ def transcribe(
             timestamp_tokens: torch.Tensor = tokens.ge(tokenizer.timestamp_begin)
             consecutive = torch.where(timestamp_tokens[:-1] & timestamp_tokens[1:])[0].add_(1)
             if len(consecutive) > 0:  # if the output contains two consecutive timestamp tokens
+                if ended_with_single_timestamp := timestamp_tokens[-2:].tolist() == [False, True]:
+                    consecutive = consecutive.tolist() + [len(tokens)]
                 last_slice = 0
                 for current_slice in consecutive:
                     sliced_tokens = tokens[last_slice:current_slice]
-                    start_timestamp_position = (
-                        sliced_tokens[0].item() - tokenizer.timestamp_begin
-                    )
-                    end_timestamp_position = min(
-                        sliced_tokens[-1].item() - tokenizer.timestamp_begin,
-                        np.ceil((num_frames - seek) / input_stride) - 1
-                    )
-                    encoder_embeddings = result.encoder_embeddings[:, :,
-                                         start_timestamp_position:int(end_timestamp_position)]
-                    decoder_embeddings = result.decoder_embeddings[:,:, int(last_slice)+1:int(current_slice)-1]
-
+                    start_timestamp_pos = sliced_tokens[0].item() - tokenizer.timestamp_begin
+                    end_timestamp_pos = sliced_tokens[-1].item() - tokenizer.timestamp_begin
                     add_segment(
-                        start=timestamp_offset + start_timestamp_position * time_precision,
-                        end=timestamp_offset + end_timestamp_position * time_precision,
+                        start=timestamp_offset + start_timestamp_pos * time_precision,
+                        end=timestamp_offset + end_timestamp_pos * time_precision,
                         text_tokens=sliced_tokens[1:-1],
                         result=result,
-                        encoder_embeddings=encoder_embeddings,
-                        decoder_embeddings=decoder_embeddings
                     )
                     last_slice = current_slice
-                last_timestamp_position = (
-                    tokens[last_slice - 1].item() - tokenizer.timestamp_begin
-                )
-                seek += last_timestamp_position * input_stride
+                if ended_with_single_timestamp:
+                    # single timestamp at the end means no speech after the last timestamp.
+                    seek += segment.shape[-1]
+                else:
+                    # otherwise, ignore the unfinished segment and seek to the last timestamp
+                    last_timestamp_pos = tokens[last_slice - 1].item() - tokenizer.timestamp_begin
+                    seek += last_timestamp_pos * input_stride
                 all_tokens.extend(tokens[: last_slice + 1].tolist())
             else:
                 duration = segment_duration
                 timestamps = tokens[timestamp_tokens.nonzero().flatten()]
                 if len(timestamps) > 0 and timestamps[-1].item() != tokenizer.timestamp_begin:
                     # no consecutive timestamps but it has a timestamp; use the last one.
-                    # single timestamp at the end means no speech after the last timestamp.
-                    last_timestamp_position = min(
-                        timestamps[-1].item() - tokenizer.timestamp_begin,
-                        np.ceil((num_frames - seek) / input_stride) - 1
-                    )
-                    duration = last_timestamp_position * time_precision
+                    last_timestamp_pos = timestamps[-1].item() - tokenizer.timestamp_begin
+                    duration = last_timestamp_pos * time_precision
 
-                    start_timestamp_position = (
-                            timestamps[0].item() - tokenizer.timestamp_begin
-                    )
-                    encoder_embeddings = result.encoder_embeddings[:, :,
-                                     start_timestamp_position:int(last_timestamp_position)]
-                    decoder_embeddings = result.decoder_embeddings[:, :, 1:-1]
                 add_segment(
                     start=timestamp_offset,
                     end=timestamp_offset + duration,
                     text_tokens=tokens,
                     result=result,
-                    encoder_embeddings=encoder_embeddings,
-                    decoder_embeddings=decoder_embeddings
                 )
 
                 seek += segment.shape[-1]
