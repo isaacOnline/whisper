@@ -167,14 +167,14 @@ class AudioEncoder(nn.Module):
 
         assert x.shape[1:] == self.positional_embedding.shape, "incorrect audio shape"
         x = (x + self.positional_embedding).to(x.dtype)
-
+        embeddings = []
         if include_embeddings:
-            embeddings = [x.cpu().detach().numpy()]
+            embeddings = [x.detach().numpy()]
 
         for block in self.blocks:
             x = block(x)
             if include_embeddings:
-                embeddings.append(x.cpu().detach().numpy())
+                embeddings.append(x.detach().numpy())
 
         x = self.ln_post(x)
 
@@ -220,14 +220,14 @@ class TextDecoder(nn.Module):
             + self.positional_embedding[offset : offset + x.shape[-1]]
         )
         x = x.to(xa.dtype)
-
+        embeddings = []
         if include_embeddings:
-            embeddings = [x.cpu().detach().numpy()]
+            embeddings = [x.detach().numpy()]
 
         for block in self.blocks:
             x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
             if include_embeddings:
-                embeddings.append(x.cpu().detach().numpy())
+                embeddings.append(x.detach().numpy())
 
         x = self.ln(x)
         logits = (

@@ -202,7 +202,7 @@ def transcribe(
         initial_prompt_tokens = []
 
     def new_segment(
-        *, start: float, end: float, tokens: torch.Tensor, result: DecodingResult
+        *, start: float, end: float, tokens: torch.Tensor, result: DecodingResult, encoder_embeddings, decoder_embeddings
     ):
         tokens = tokens.tolist()
         text_tokens = [token for token in tokens if token < tokenizer.eot]
@@ -216,6 +216,8 @@ def transcribe(
             "avg_logprob": result.avg_logprob,
             "compression_ratio": result.compression_ratio,
             "no_speech_prob": result.no_speech_prob,
+            "encoder_embeddings": encoder_embeddings,
+            "decoder_embeddings": decoder_embeddings
         }
 
     # show the progress bar when verbose is False (if True, transcribed text will be printed)
@@ -270,12 +272,18 @@ def transcribe(
                     end_timestamp_pos = (
                         sliced_tokens[-1].item() - tokenizer.timestamp_begin
                     )
+                    encoder_embeddings = result.encoder_embeddings[:, :,
+                                         start_timestamp_pos:int(end_timestamp_pos)]
+                    decoder_embeddings = result.decoder_embeddings[:, :, int(last_slice) + 1:int(current_slice) - 1]
+
                     current_segments.append(
                         new_segment(
                             start=time_offset + start_timestamp_pos * time_precision,
                             end=time_offset + end_timestamp_pos * time_precision,
                             tokens=sliced_tokens,
                             result=result,
+                            encoder_embeddings=encoder_embeddings,
+                            decoder_embeddings=decoder_embeddings
                         )
                     )
                     last_slice = current_slice
@@ -300,7 +308,14 @@ def transcribe(
                     last_timestamp_pos = (
                         timestamps[-1].item() - tokenizer.timestamp_begin
                     )
+                    start_timestamp_position = (
+                            timestamps[0].item() - tokenizer.timestamp_begin
+                    )
                     duration = last_timestamp_pos * time_precision
+
+                encoder_embeddings = result.encoder_embeddings[:, :,
+                                     start_timestamp_position:int(last_timestamp_pos)]
+                decoder_embeddings = result.decoder_embeddings[:, :, 1:-1]
 
                 current_segments.append(
                     new_segment(
@@ -308,6 +323,8 @@ def transcribe(
                         end=time_offset + duration,
                         tokens=tokens,
                         result=result,
+                        encoder_embeddings=encoder_embeddings,
+                        decoder_embeddings=decoder_embeddings
                     )
                 )
                 seek += segment_size

@@ -156,9 +156,7 @@ class PyTorchInference(Inference):
             # only need to use the last token except in the first forward pass
             tokens = tokens[:, -1:]
 
-        return_val = self.model.decoder(tokens, audio_features,
-                                        kv_cache=self.kv_cache, include_embeddings=include_embeddings)
-        return return_val
+        return self.model.decoder(tokens, audio_features, kv_cache=self.kv_cache, include_embeddings=include_embeddings)
 
     def cleanup_caching(self):
         for hook in self.hooks:
@@ -683,9 +681,8 @@ class DecodingTask:
         n_batch = tokens.shape[0]
         sum_logprobs: Tensor = torch.zeros(n_batch, device=audio_features.device)
         no_speech_probs = [np.nan] * n_batch
-
+        embeddings = []
         try:
-            embeddings = []
             for i in range(self.sample_len):
                 logits, token_embeddings = self.inference.logits(tokens, audio_features, include_embeddings=True)
 
