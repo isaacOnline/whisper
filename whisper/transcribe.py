@@ -26,6 +26,7 @@ def transcribe(
     logprob_threshold: Optional[float] = -1.0,
     no_speech_threshold: Optional[float] = 0.6,
     condition_on_previous_text: bool = True,
+    force_extraction: bool = False,
     **decode_options,
 ):
     """
@@ -241,7 +242,19 @@ def transcribe(
                             timestamps[0].item() - tokenizer.timestamp_begin
                     )
                     encoder_embeddings = result.encoder_embeddings[:, :,
-                                     start_timestamp_position:int(last_timestamp_position)]
+                                         start_timestamp_position:int(last_timestamp_position)]
+                    decoder_embeddings = result.decoder_embeddings[:, :, 1:-1]
+                elif force_extraction:
+                    # no consecutive timestamps but it has a timestamp; use the last one.
+                    # single timestamp at the end means no speech after the last timestamp.
+                    end_position = np.ceil((num_frames - seek) / input_stride) - 1
+                    duration = end_position * time_precision
+
+                    start_timestamp_position = (
+                            timestamps[0].item() - tokenizer.timestamp_begin
+                    )
+                    encoder_embeddings = result.encoder_embeddings[:, :,
+                                     start_timestamp_position:int(end_position)]
                     decoder_embeddings = result.decoder_embeddings[:, :, 1:-1]
                 add_segment(
                     start=timestamp_offset,
